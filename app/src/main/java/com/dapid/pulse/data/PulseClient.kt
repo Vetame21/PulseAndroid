@@ -2,8 +2,15 @@ package com.dapid.pulse.data
 
 import org.json.JSONObject
 import java.time.LocalDate
+import java.time.YearMonth
 
-data class AccountSettings(val onboarded: Boolean, val region: Region, val homeCurrency: String)
+data class AccountSettings(
+    val onboarded: Boolean,
+    val region: Region,
+    val homeCurrency: String, // CNY or HKD
+    val timezone: String = "Asia/Shanghai",
+    val categories: List<Category> = emptyList(),
+)
 
 /** The app's calls, with the token handled: a 401 refreshes once, then asks you to sign in again. */
 class PulseClient(private val api: PulseApi, private val session: Session) {
@@ -27,6 +34,8 @@ class PulseClient(private val api: PulseApi, private val session: Session) {
                     onboarded = r.value.optBoolean("onboarded"),
                     region = Region.fromKey(r.value.optString("region")) ?: Region.Mainland,
                     homeCurrency = r.value.optString("homeCurrency", "CNY"),
+                    timezone = r.value.optString("timezone", "Asia/Shanghai"),
+                    categories = parseCategories(r.value.optJSONArray("categories")),
                 ),
             )
             is ApiResult.Error -> r
@@ -37,6 +46,29 @@ class PulseClient(private val api: PulseApi, private val session: Session) {
             is ApiResult.Ok -> ApiResult.Ok(Unit)
             is ApiResult.Error -> r
         }
+
+    suspend fun today(): ApiResult<Today> = authed("GET", "/today").map(::parseToday)
+
+    suspend fun tick(date: LocalDate, index: Int, done: Boolean): ApiResult<Unit> =
+        authed("POST", "/day-plan/tick", JSONObject().put("date", date.toString()).put("index", index).put("done", done)).map { }
+
+    /** This month's budget, expenses and spending calendar (two calls, one screen). */
+    suspend fun money(): ApiResult<Money> {
+        val money = authed("GET", "/money")
+        if (money !is ApiResult.Ok) return money as ApiResult.Error
+        return authed("GET", "/money/calendar").map { parseMoney(money.value, it) }
+    }
+
+    /** [id] is made once per form, so tapping Save again after a timeout saves it once. */
+    suspend fun addExpense(id: String, amount: String, category: String, date: LocalDate, note: String): ApiResult<String> =
+        authed(
+            "POST", "/expenses",
+            JSONObject().put("id", id).put("amount", amount.trim()).put("category", category).put("date", date.toString()).put("note", note.trim()),
+        ).map { it.optString("message", "Saved.") }
+
+    suspend fun calendar(month: YearMonth): ApiResult<CalendarMonth> = authed("GET", "/calendar?month=$month").map(::parseCalendar)
+
+    suspend fun addEvent(body: JSONObject): ApiResult<Unit> = authed("POST", "/events", body).map { }
 
     /** Public holidays (no sign-in): this year's, plus next year's so late December still has a "next". */
     suspend fun holidays(region: Region, today: LocalDate): ApiResult<List<HolidayDay>> {
@@ -75,4 +107,10 @@ class PulseClient(private val api: PulseApi, private val session: Session) {
     }
 
     private fun saveTokens(json: JSONObject) = session.save(json.getString("accessToken"), json.getString("refreshToken"))
+}
+
+/** Turn an Ok JSON answer into a model; a reading bug becomes an error instead of a crash. */
+private inline fun <T> ApiResult<JSONObject>.map(f: (JSONObject) -> T): ApiResult<T> = when (this) {
+    is ApiResult.Ok -> runCatching { ApiResult.Ok(f(value)) }.getOrElse { ApiResult.Error(-1, "Pulse sent something this app can't read. Update the app.") }
+    is ApiResult.Error -> this
 }

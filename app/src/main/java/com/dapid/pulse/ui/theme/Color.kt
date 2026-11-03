@@ -30,3 +30,10 @@ object Dark {
     val dangerSoft = Color(0xFF3A1714)
     val track = Color(0xFF232A27)
 }
+
+/** Spending-calendar heat (web --heat-1…5): green under the daily allowance to dark red far over. Same in both themes. */
+object Heat {
+    val levels = listOf(Color(0xFF5FB576), Color(0xFFC9C552), Color(0xFFEE9A3A), Color(0xFFC43F2C), Color(0xFF7F1D1D))
+    val inkLow = Color(0xFF121614)
+    val inkHigh = Color(0xFFFFFFFF)
+}

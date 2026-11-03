@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,4 +66,21 @@ fun PageHeader(title: String, eyebrow: String? = null) {
         }
         Text(title, style = MaterialTheme.typography.headlineSmall)
     }
+}
+
+/** Month budget progress: green on track, amber above pace, red over (same as the web). */
+@Composable
+fun BudgetBar(budget: com.dapid.pulse.data.MonthBudget) {
+    val color = when (budget.status) {
+        "over_budget" -> MaterialTheme.colorScheme.error
+        "above_pace" -> com.dapid.pulse.ui.theme.Heat.levels[2]
+        else -> MaterialTheme.colorScheme.primary
+    }
+    androidx.compose.material3.LinearProgressIndicator(
+        progress = { budget.progress.toFloat().coerceIn(0f, 1f) },
+        color = color,
+        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        drawStopIndicator = {},
+        modifier = Modifier.fillMaxWidth().height(8.dp),
+    )
 }

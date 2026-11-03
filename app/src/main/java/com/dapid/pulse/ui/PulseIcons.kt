@@ -23,6 +23,8 @@ object PulseIcons {
     val More = dots()
     val Expense = line("Expense", "M7 4h10M12 4v16M8.5 9.5h7M8.5 13.5h7M8 20l4-6.5L16 20")
     val Event = Calendar
+    val ChevronLeft = line("Previous", "M15 5l-7 7 7 7")
+    val ChevronRight = line("Next", "M9 5l7 7-7 7")
     val Deadline = line("Deadline", "M19.5 13a7.5 7.5 0 1 1-15 0a7.5 7.5 0 1 1 15 0z", "M12 9.5V13l2.5 1.5M9.5 2.5h5")
 }
 
