@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# The APK copied out for sharing (build it again with Build → Build APK)
+/Pulse.apk

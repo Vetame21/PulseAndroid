@@ -29,7 +29,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,8 +45,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.dapid.pulse.data.AccountSettings
-import com.dapid.pulse.data.PulseClient
+import com.dapid.pulse.data.Store
 import com.dapid.pulse.ui.screens.CalendarScreen
 import com.dapid.pulse.ui.screens.EventForm
 import com.dapid.pulse.ui.screens.ExpenseForm
@@ -75,11 +73,10 @@ private val ADD_CHOICES = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PulseApp(client: PulseClient, settings: AccountSettings, onSignOut: () -> Unit, onSignedOut: () -> Unit) {
+fun PulseApp(store: Store) {
     var tab by rememberSaveable { mutableStateOf(Tab.Today) }
     var adding by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<AddChoice?>(null) }
-    var saves by remember { mutableIntStateOf(0) } // bumps after a save so the tabs load again
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -94,10 +91,10 @@ fun PulseApp(client: PulseClient, settings: AccountSettings, onSignOut: () -> Un
         },
     ) { padding ->
         when (tab) {
-            Tab.Today -> TodayScreen(padding, client, settings, saves, onSignedOut)
-            Tab.Calendar -> CalendarScreen(padding, client, saves, onSignedOut)
-            Tab.Money -> MoneyScreen(padding, client, settings, saves, onSignedOut)
-            Tab.More -> MoreScreen(padding, onSignOut)
+            Tab.Today -> TodayScreen(padding, store)
+            Tab.Calendar -> CalendarScreen(padding, store)
+            Tab.Money -> MoneyScreen(padding, store)
+            Tab.More -> MoreScreen(padding, store)
         }
     }
 
@@ -116,7 +113,6 @@ fun PulseApp(client: PulseClient, settings: AccountSettings, onSignOut: () -> Un
     form?.let { choice ->
         val saved = { message: String ->
             form = null
-            saves++
             scope.launch { snackbar.showSnackbar(message) }
             Unit
         }
@@ -126,9 +122,9 @@ fun PulseApp(client: PulseClient, settings: AccountSettings, onSignOut: () -> Un
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
             when (choice.label) {
-                "Expense" -> ExpenseForm(client, settings, saved)
-                "Deadline" -> EventForm(client, settings, deadline = true, onSaved = saved)
-                else -> EventForm(client, settings, deadline = false, onSaved = saved)
+                "Expense" -> ExpenseForm(store, saved)
+                "Deadline" -> EventForm(store, deadline = true, onSaved = saved)
+                else -> EventForm(store, deadline = false, onSaved = saved)
             }
         }
     }

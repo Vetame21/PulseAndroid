@@ -72,8 +72,8 @@ fun PageHeader(title: String, eyebrow: String? = null) {
 @Composable
 fun BudgetBar(budget: com.dapid.pulse.data.MonthBudget) {
     val color = when (budget.status) {
-        "over_budget" -> MaterialTheme.colorScheme.error
-        "above_pace" -> com.dapid.pulse.ui.theme.Heat.levels[2]
+        com.dapid.pulse.data.BudgetStatus.OverBudget -> MaterialTheme.colorScheme.error
+        com.dapid.pulse.data.BudgetStatus.AbovePace -> com.dapid.pulse.ui.theme.Heat.levels[2]
         else -> MaterialTheme.colorScheme.primary
     }
     androidx.compose.material3.LinearProgressIndicator(

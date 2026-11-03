@@ -20,44 +20,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.dapid.pulse.data.ApiResult
-import com.dapid.pulse.data.PulseClient
 import com.dapid.pulse.data.Region
+import com.dapid.pulse.data.Store
 import com.dapid.pulse.data.budgetProblem
+import com.dapid.pulse.data.currencySymbol
+import com.dapid.pulse.data.parseAmount
 import com.dapid.pulse.ui.components.PageHeader
 import com.dapid.pulse.ui.components.PulseCard
 import com.dapid.pulse.ui.components.ScreenColumn
 import com.dapid.pulse.ui.components.SectionLabel
-import kotlinx.coroutines.launch
 
 /** First run: where you live (fixes ¥ or HK$, the timezone and the holidays) and your monthly budget. */
 @Composable
-fun SetupScreen(client: PulseClient, onDone: () -> Unit) {
+fun SetupScreen(store: Store) {
     var region by rememberSaveable { mutableStateOf<Region?>(null) }
     var budget by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     fun submit() {
         val picked = region ?: return run { error = "Pick where you live." }
         budgetProblem(budget)?.let { error = it; return }
-        busy = true
-        error = null
-        scope.launch {
-            when (val r = client.setup(picked, budget)) {
-                is ApiResult.Ok -> onDone()
-                is ApiResult.Error -> error = r.message
-            }
-            busy = false
-        }
+        // Track from the 1st of this month, so the first month has a full budget.
+        store.update { it.copy(region = picked, budgetFen = parseAmount(budget)!!, trackingStart = picked.today().withDayOfMonth(1)) }
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
@@ -77,18 +67,16 @@ fun SetupScreen(client: PulseClient, onDone: () -> Unit) {
                 OutlinedTextField(
                     value = budget,
                     onValueChange = { budget = it },
-                    prefix = { Text(region?.currency ?: "") },
+                    prefix = { Text(region?.let { currencySymbol(it.currency) } ?: "") },
                     placeholder = { Text("1500") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text("What you plan to spend each month.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("What you plan to spend each month. You can change it in More.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
-            Button(onClick = ::submit, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text(if (busy) "Setting up…" else "Start")
-            }
+            Button(onClick = ::submit, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Start") }
         }
     }
 }

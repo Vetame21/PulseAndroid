@@ -18,15 +18,16 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,40 +35,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.dapid.pulse.data.AccountSettings
-import com.dapid.pulse.data.ApiResult
-import com.dapid.pulse.data.PulseClient
+import com.dapid.pulse.data.CATEGORIES
+import com.dapid.pulse.data.LocalEvent
+import com.dapid.pulse.data.LocalExpense
+import com.dapid.pulse.data.Region
+import com.dapid.pulse.data.Store
+import com.dapid.pulse.data.category
 import com.dapid.pulse.data.currencySymbol
 import com.dapid.pulse.data.dayLabel
-import kotlinx.coroutines.launch
-import org.json.JSONObject
+import com.dapid.pulse.data.formatMoney
+import com.dapid.pulse.data.isTime
+import com.dapid.pulse.data.parseAmount
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 
-private fun todayIn(settings: AccountSettings): LocalDate = LocalDate.now(runCatching { ZoneId.of(settings.timezone) }.getOrDefault(ZoneId.systemDefault()))
+private const val MAX_AMOUNT_FEN = 100_000_000L // ¥1,000,000: anything larger is surely a typo
 
 /** Quick add: amount first (number pad), a category chip, optional note. Today by default. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ExpenseForm(client: PulseClient, settings: AccountSettings, onSaved: (String) -> Unit) {
-    val id = rememberSaveable { UUID.randomUUID().toString() } // one id per form: a retry never saves twice
+fun ExpenseForm(store: Store, onSaved: (String) -> Unit) {
+    val currency = store.data.currency
+    val today = remember { (store.data.region ?: Region.Mainland).today() }
     var amount by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf(settings.categories.firstOrNull()?.key ?: "food") }
+    var categoryKey by rememberSaveable { mutableStateOf(CATEGORIES.first().key) }
     var note by rememberSaveable { mutableStateOf("") }
-    val today = remember { todayIn(settings) }
     var date by rememberSaveable { mutableStateOf(today.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     FormColumn("New expense") {
         OutlinedTextField(
             value = amount,
             onValueChange = { amount = it },
-            prefix = { Text(currencySymbol(settings.homeCurrency)) },
+            prefix = { Text(currencySymbol(currency)) },
             placeholder = { Text("32.50") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -75,49 +77,53 @@ fun ExpenseForm(client: PulseClient, settings: AccountSettings, onSaved: (String
             modifier = Modifier.fillMaxWidth(),
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            settings.categories.forEach { c ->
-                FilterChip(selected = c.key == category, onClick = { category = c.key }, label = { Text("${c.emoji} ${c.label}") })
+            CATEGORIES.forEach { c ->
+                FilterChip(selected = c.key == categoryKey, onClick = { categoryKey = c.key }, label = { Text("${c.emoji} ${c.label}") })
             }
         }
-        OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("Note (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = note, onValueChange = { note = it.take(200) }, label = { Text("Note (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         DateField(LocalDate.parse(date), today, maxToday = true) { date = it.toString() }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         Button(
             onClick = {
-                busy = true
-                error = null
-                scope.launch {
-                    when (val r = client.addExpense(id, amount, category, LocalDate.parse(date), note)) {
-                        is ApiResult.Ok -> onSaved(r.value)
-                        is ApiResult.Error -> error = r.message
-                    }
-                    busy = false
+                val cents = parseAmount(amount)
+                if (cents == null || cents > MAX_AMOUNT_FEN) {
+                    error = "Enter an amount like 32 or 32.50."
+                    return@Button
                 }
+                val day = LocalDate.parse(date)
+                store.update { it.copy(expenses = it.expenses + LocalExpense(UUID.randomUUID().toString(), day, cents, categoryKey, note.trim().ifEmpty { null })) }
+                val c = category(categoryKey)
+                onSaved("Saved ${formatMoney(cents, currency)} · ${c.emoji} ${c.label} · ${dayLabel(day, today)}")
             },
-            enabled = !busy && amount.isNotBlank(),
+            enabled = amount.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(48.dp),
-        ) { Text(if (busy) "Saving…" else "Save") }
+        ) { Text("Save") }
     }
 }
 
 /** A new event (class, exam, dinner…) or deadline (homework, submission). */
 @Composable
-fun EventForm(client: PulseClient, settings: AccountSettings, deadline: Boolean, onSaved: (String) -> Unit) {
-    val id = rememberSaveable { UUID.randomUUID().toString() }
-    val today = remember { todayIn(settings) }
+fun EventForm(store: Store, deadline: Boolean, onSaved: (String) -> Unit) {
+    val today = remember { (store.data.region ?: Region.Mainland).today() }
     var title by rememberSaveable { mutableStateOf("") }
     var date by rememberSaveable { mutableStateOf(today.toString()) }
     var allDay by rememberSaveable { mutableStateOf(deadline) }
     var start by rememberSaveable { mutableStateOf("") }
     var end by rememberSaveable { mutableStateOf("") }
     var location by rememberSaveable { mutableStateOf("") }
-    var leadDays by rememberSaveable { mutableStateOf(7) }
+    var leadDays by rememberSaveable { mutableIntStateOf(7) }
     var error by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+
+    fun problem(): String? = when {
+        title.isBlank() -> "Give it a title."
+        !allDay && !isTime(start) -> "Use a time like 14:30."
+        !allDay && !deadline && end.isNotBlank() && (!isTime(end) || end <= start) -> "The end time should be after the start, like 16:00."
+        else -> null
+    }
 
     FormColumn(if (deadline) "New deadline" else "New event") {
-        OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = title, onValueChange = { title = it.take(200) }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         DateField(LocalDate.parse(date), today, maxToday = false) { date = it.toString() }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Switch(checked = !allDay, onCheckedChange = { allDay = !it })
@@ -137,34 +143,29 @@ fun EventForm(client: PulseClient, settings: AccountSettings, deadline: Boolean,
                 }
             }
         } else {
-            OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Place (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = location, onValueChange = { location = it.take(200) }, label = { Text("Place (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         Button(
             onClick = {
-                busy = true
-                error = null
-                val body = JSONObject()
-                    .put("id", id)
-                    .put("kind", if (deadline) "deadline" else "event")
-                    .put("title", title.trim())
-                    .put("date", date)
-                    .put("allDay", allDay)
-                    .put("startTime", if (allDay) "" else start.trim())
-                    .put("endTime", if (allDay || deadline) "" else end.trim())
-                    .put("location", if (deadline) "" else location.trim())
-                if (deadline) body.put("leadDays", leadDays)
-                scope.launch {
-                    when (val r = client.addEvent(body)) {
-                        is ApiResult.Ok -> onSaved(if (deadline) "Deadline added." else "Event added.")
-                        is ApiResult.Error -> error = r.message
-                    }
-                    busy = false
-                }
+                problem()?.let { error = it; return@Button }
+                val event = LocalEvent(
+                    id = UUID.randomUUID().toString(),
+                    title = title.trim(),
+                    date = LocalDate.parse(date),
+                    startTime = if (allDay) null else start,
+                    endTime = if (allDay || deadline || end.isBlank()) null else end,
+                    location = if (deadline) null else location.trim().ifEmpty { null },
+                    deadline = deadline,
+                    leadDays = if (deadline) leadDays else null,
+                    done = false,
+                )
+                store.update { it.copy(events = it.events + event) }
+                onSaved(if (deadline) "Deadline added." else "Event added.")
             },
-            enabled = !busy && title.isNotBlank(),
+            enabled = title.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(48.dp),
-        ) { Text(if (busy) "Saving…" else "Save") }
+        ) { Text("Save") }
     }
 }
 
@@ -202,7 +203,7 @@ private fun DateField(date: LocalDate, today: LocalDate, maxToday: Boolean, onPi
     val toMillis = { d: LocalDate -> d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
     val state = rememberDatePickerState(
         initialSelectedDateMillis = toMillis(date),
-        selectableDates = object : androidx.compose.material3.SelectableDates {
+        selectableDates = object : SelectableDates {
             override fun isSelectableDate(utcTimeMillis: Long) = !maxToday || utcTimeMillis <= toMillis(today)
         },
     )

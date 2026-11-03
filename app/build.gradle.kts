@@ -20,13 +20,7 @@ android {
     }
 
     buildTypes {
-        debug {
-            // Your laptop's dev server (`npm run dev` in the web repo), reached through
-            // `adb reverse tcp:3000 tcp:3000` (works on the emulator and on a phone over USB).
-            buildConfigField("String", "API_BASE", "\"http://localhost:3000\"")
-        }
         release {
-            buildConfigField("String", "API_BASE", "\"https://pulse-flows.netlify.app\"")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
@@ -39,7 +33,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 }
 

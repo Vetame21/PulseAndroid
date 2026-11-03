@@ -9,90 +9,109 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.dapid.pulse.data.AccountSettings
-import com.dapid.pulse.data.ApiResult
-import com.dapid.pulse.data.PulseClient
-import com.dapid.pulse.data.Today
+import com.dapid.pulse.data.AppData
+import com.dapid.pulse.data.Holidays
+import com.dapid.pulse.data.PlanEntry
+import com.dapid.pulse.data.Region
+import com.dapid.pulse.data.Store
+import com.dapid.pulse.data.activeDeadlines
+import com.dapid.pulse.data.computeMonthBudget
 import com.dapid.pulse.data.dayLabel
 import com.dapid.pulse.data.deadlineText
 import com.dapid.pulse.data.formatMoney
+import com.dapid.pulse.data.holidayThisWeek
 import com.dapid.pulse.data.longDay
 import com.dapid.pulse.data.timeRange
+import com.dapid.pulse.data.upNext
 import com.dapid.pulse.ui.components.BudgetBar
-import com.dapid.pulse.ui.components.Loading
 import com.dapid.pulse.ui.components.PageHeader
 import com.dapid.pulse.ui.components.PulseCard
+import com.dapid.pulse.ui.components.ScreenColumn
 import com.dapid.pulse.ui.components.SectionLabel
-import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.YearMonth
+
+private fun greeting(hour: Int) = when (hour) {
+    in 5..11 -> "Good morning"
+    in 12..17 -> "Good afternoon"
+    in 18..23 -> "Good evening"
+    else -> "Still up?"
+}
 
 @Composable
-fun TodayScreen(padding: PaddingValues, client: PulseClient, settings: AccountSettings, reloadKey: Int, onSignedOut: () -> Unit) {
-    Loading(padding, reloadKey, load = client::today, onSignedOut = onSignedOut) { t, _ ->
-        PageHeader(title = longDay(t.date), eyebrow = t.greeting)
-        Briefing(t)
-        Plan(t, client)
-        MoneyCard(t, settings.homeCurrency)
+fun TodayScreen(padding: PaddingValues, store: Store) {
+    val d = store.data
+    val region = d.region ?: Region.Mainland
+    val today = region.today()
+    val now = region.nowTime()
+    ScreenColumn(padding) {
+        PageHeader(title = longDay(today), eyebrow = greeting(now.take(2).toInt()))
+        Briefing(store, d, region, today, now)
+        Plan(store, d.plans[today].orEmpty(), today)
+        MoneyCard(d, today)
     }
 }
 
 @Composable
-private fun Briefing(t: Today) {
-    val summary = buildString {
-        append(if (t.classesToday == 0) "No classes today" else "${t.classesToday} class${if (t.classesToday > 1) "es" else ""} today")
-        if (t.deadlines.isNotEmpty()) append(" · ${t.deadlines.size} deadline${if (t.deadlines.size > 1) "s" else ""} to work on")
-    }
+private fun Briefing(store: Store, d: AppData, region: Region, today: LocalDate, now: String) {
+    val holidays = Holidays.load(LocalContext.current, region, setOf(today.year, today.plusDays(7).year))
+    val deadlines = activeDeadlines(d.events, today)
+    val next = upNext(d.events, today, now)
     PulseCard {
         SectionLabel("Briefing")
-        Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        t.birthdays.forEach { b ->
+        holidayThisWeek(holidays, today)?.let { h ->
             Note(
-                if (b.inMemory) "🕯️ ${dayLabel(b.date, t.date)}: remembering ${b.name}"
-                else "🎂 ${dayLabel(b.date, t.date)}: ${b.name}'s birthday${b.turns?.let { " ($it)" } ?: ""}${if (b.inDays == 0) " 🎉" else ""}",
-                tone = if (b.inDays == 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                if (h.off) "📅 ${dayLabel(h.date, today)}: ${h.name} holiday" else "💼 ${dayLabel(h.date, today)}: make-up workday for ${h.name} (调休)",
+                if (h.off) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
             )
         }
-        t.holiday?.let { h ->
-            Note(
-                if (h.off) "📅 ${dayLabel(h.date, t.date)}: ${h.name} holiday" else "💼 ${dayLabel(h.date, t.date)}: make-up workday for ${h.name} (调休)",
-                tone = if (h.off) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
-            )
-        }
-        if (t.deadlines.isNotEmpty()) {
+        if (deadlines.isNotEmpty()) {
             SectionLabel("Work on")
-            t.deadlines.forEach { d ->
-                Column {
-                    Text(d.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(
-                        deadlineText(d.date, d.daysLeft, d.startTime, t.date),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (d.daysLeft < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            deadlines.forEach { a ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = false, onCheckedChange = {
+                        store.update { s -> s.copy(events = s.events.map { if (it.id == a.event.id) it.copy(done = true) else it }) }
+                    })
+                    Column {
+                        Text(a.event.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(
+                            deadlineText(a.event.date, a.daysLeft, a.event.startTime, today),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (a.daysLeft < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
         SectionLabel("Up next")
-        if (t.upNext.isEmpty()) {
-            Text("Nothing planned for the next 7 days.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        t.upNext.forEach { (day, items) ->
-            Text(dayLabel(day, t.date), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (next.isEmpty()) Text("Nothing planned for the next 7 days. Tap + to add an event.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        next.forEach { (day, items) ->
+            Text(dayLabel(day, today), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             items.forEach { e ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
-                        Text("${if (e.id.startsWith("class:")) "🎓" else "📌"} ${e.title}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text("📌 ${e.title}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                         e.location?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                     Text(timeRange(e.startTime, e.endTime), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -103,54 +122,58 @@ private fun Briefing(t: Today) {
 }
 
 @Composable
-private fun Note(text: String, tone: androidx.compose.ui.graphics.Color) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.fillMaxWidth().background(tone, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
-    )
+private fun Note(text: String, tone: Color) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth().background(tone, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp))
 }
 
-/** Tap to tick: the box changes at once, and goes back if the save fails. */
+/** Write your day, then tick it off. Tap an item to tick it; × removes it. */
 @Composable
-private fun Plan(t: Today, client: PulseClient) {
-    val items = remember(t) { mutableStateListOf(*t.plan.toTypedArray()) }
-    val scope = rememberCoroutineScope()
+private fun Plan(store: Store, items: List<PlanEntry>, today: LocalDate) {
+    var draft by rememberSaveable { mutableStateOf("") }
+    fun setItems(change: (List<PlanEntry>) -> List<PlanEntry>) = store.update { s -> s.copy(plans = s.plans + (today to change(s.plans[today].orEmpty()))) }
+    fun add() {
+        val text = draft.trim()
+        if (text.isEmpty()) return
+        setItems { it + PlanEntry(text, false) }
+        draft = ""
+    }
     PulseCard {
         SectionLabel("Today's plan")
-        if (items.isEmpty()) {
-            Text("No plan for today yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
         items.forEachIndexed { i, item ->
             if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(
-                Modifier.fillMaxWidth().clickable {
-                    val done = !item.done
-                    items[i] = item.copy(done = done)
-                    scope.launch { if (client.tick(t.date, i, done) !is ApiResult.Ok) items[i] = item }
-                },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Row(Modifier.fillMaxWidth().clickable { setItems { list -> list.mapIndexed { j, e -> if (j == i) e.copy(done = !e.done) else e } } }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = item.done, onCheckedChange = null, modifier = Modifier.padding(8.dp))
                 Text(
                     item.text,
                     style = MaterialTheme.typography.bodyMedium,
                     textDecoration = if (item.done) TextDecoration.LineThrough else null,
                     color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = { setItems { list -> list.filterIndexed { j, _ -> j != i } } }) { Text("×") }
             }
         }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            placeholder = { Text(if (items.isEmpty()) "Write your day, then tick it off" else "Add another") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { add() }),
+            trailingIcon = { TextButton(onClick = ::add, enabled = draft.isNotBlank()) { Text("Add") } },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
 @Composable
-private fun MoneyCard(t: Today, currency: String) {
-    val b = t.budget
+private fun MoneyCard(d: AppData, today: LocalDate) {
+    val b = computeMonthBudget(YearMonth.from(today), d.budgetFen, today, d.trackingStart, d.expenses)
     PulseCard {
         SectionLabel("Money")
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                formatMoney(kotlin.math.abs(b.remainingFen), currency),
+                formatMoney(kotlin.math.abs(b.remainingFen), d.currency),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = if (b.remainingFen < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -159,7 +182,7 @@ private fun MoneyCard(t: Today, currency: String) {
         }
         BudgetBar(b)
         Text(
-            "${formatMoney(b.safeDailyFen ?: 0, currency)}/day safe · ${formatMoney(b.spentTodayFen ?: 0, currency)} spent today",
+            "${formatMoney(b.safeDailyFen ?: 0, d.currency)}/day safe · ${formatMoney(b.spentTodayFen ?: 0, d.currency)} spent today",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
