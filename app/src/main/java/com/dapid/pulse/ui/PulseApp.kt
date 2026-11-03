@@ -69,7 +69,7 @@ private val ADD_CHOICES = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PulseApp() {
+fun PulseApp(onSignOut: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.Today) }
     var adding by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -89,7 +89,7 @@ fun PulseApp() {
             Tab.Today -> TodayScreen(padding)
             Tab.Calendar -> CalendarScreen(padding)
             Tab.Money -> MoneyScreen(padding)
-            Tab.More -> MoreScreen(padding)
+            Tab.More -> MoreScreen(padding, onSignOut)
         }
     }
 

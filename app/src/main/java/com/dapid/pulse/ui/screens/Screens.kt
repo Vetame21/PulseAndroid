@@ -1,9 +1,14 @@
 package com.dapid.pulse.ui.screens
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.dapid.pulse.ui.components.PageHeader
 import com.dapid.pulse.ui.components.PulseCard
 import com.dapid.pulse.ui.components.ScreenColumn
@@ -44,11 +49,11 @@ fun MoneyScreen(padding: PaddingValues) {
 }
 
 @Composable
-fun MoreScreen(padding: PaddingValues) {
+fun MoreScreen(padding: PaddingValues, onSignOut: () -> Unit) {
     ScreenColumn(padding) {
         PageHeader(title = "More")
-        Placeholder("Settings", "Theme and sign out.")
-        Placeholder("On the web", "Savings, accounts, goals, notices and news live at pulse-flows.netlify.app.")
+        Placeholder("Settings", "Theme and budget.")
+        OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Sign out") }
     }
 }
 
